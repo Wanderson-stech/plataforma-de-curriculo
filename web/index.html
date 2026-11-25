@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore vagas, acompanhe suas candidaturas e prepare currículos no Radar.">
+  <title>Radar — Sua busca de carreira</title>
+  <link rel="icon" href="./assets/radar.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+  <aside class="sidebar">
+    <a class="brand" href="#visao-geral" aria-label="Radar — Visão geral">
+      <img src="./assets/radar.svg" width="28" height="28" alt=""><span>radar.</span>
+    </a>
+    <button id="menu-toggle" class="button secondary menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav">Menu</button>
+    <nav id="main-nav" aria-label="Navegação principal">
+      <p class="nav-caption">Espaço pessoal</p>
+      <a href="#visao-geral">Visão geral</a>
+      <a href="#vagas">Explorar vagas</a>
+      <a href="#candidaturas">Candidaturas</a>
+      <a href="#curriculos">Currículos</a>
+      <a href="#perfil">Meu perfil</a>
+      <a href="#alertas">Meus alertas</a>
+      <a href="#configuracoes">Configurações</a>
+    </nav>
+    <a class="account" href="#configuracoes">
+      <span class="avatar" aria-hidden="true">P</span>
+      <span><strong>Meu espaço</strong><small>Conta pessoal</small></span>
+    </a>
+  </aside>
+  <div class="app">
+    <header class="topbar">
+      <p id="breadcrumb"></p><span id="sync-status" role="status">Espaço pessoal</span>
+    </header>
+    <main id="conteudo" class="content" tabindex="-1"></main>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>Ative o JavaScript para usar o Radar.</noscript>
+</body>
+</html>
