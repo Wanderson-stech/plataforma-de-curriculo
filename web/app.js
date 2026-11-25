@@ -32,12 +32,14 @@ const normalized = text => String(text ?? '').normalize('NFD').replace(/\p{Diacr
 const commaList = value => String(value ?? '').split(',').map(item => item.trim()).filter(Boolean);
 const lineList = value => String(value ?? '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
 const byId = (items, id) => items.find(item => item.id === id);
-const findJob = id => byId(data.jobs, id);
+const findJob = id => byId(discovery.jobs, id) ?? byId(data.jobs, id);
 const jobUrl = id => '#vagas/' + encodeURIComponent(id);
 const newId = () => crypto.randomUUID();
 const pageSize = 5;
 
 let data = initialData();
+let discovery = { jobs: [], checkedAt: null };
+let searching = false;
 let revision = 0;
 let ready = false;
 let saveQueue = Promise.resolve();
@@ -136,6 +138,7 @@ function progress(value, label) {
 }
 
 function scoreJob(job) {
+  if (job.automatic) return job.fit ?? null;
   if (!job.skills?.length || !profileSkills().size) return null;
   return Math.round(100 * matchedSkills(job).length / job.skills.length);
 }
@@ -148,6 +151,7 @@ function profileSkills() {
 }
 
 function matchedSkills(job) {
+  if (job.automatic) return job.skills ?? [];
   const known = profileSkills();
   return (job.skills ?? []).filter(item => known.has(normalized(item)));
 }
@@ -162,14 +166,14 @@ function elapsed(date) {
 
 function jobTable(jobs) {
   if (!jobs.length) {
-    return data.jobs.length
+    return jobsByDate().length
       ? '<div class="panel empty">Nenhuma oportunidade encontrada.</div>'
       : `<div class="panel empty"><p>Seu Radar ainda está sem vagas.</p>
-          ${button('Adicionar uma vaga por link', 'import', 'secondary')}</div>`;
+          <a class="button secondary" href="#alertas">Configurar busca automática</a></div>`;
   }
   return `<div class="panel jobs" tabindex="0" role="region" aria-label="Tabela de oportunidades">
     <table><thead><tr><th scope="col">Cargo / empresa</th><th scope="col">Fonte</th><th scope="col">Modelo</th>
-      <th scope="col">Aderência</th><th scope="col">Cadastro</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+      <th scope="col">Aderência</th><th scope="col">Data</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
     <tbody>${jobs.map(job => {
       const score = scoreJob(job);
       return `<tr>
@@ -182,7 +186,9 @@ function jobTable(jobs) {
 }
 
 function jobsByDate() {
-  return [...data.jobs].sort((first, second) => second.date - first.date);
+  const unique = new Map([...data.jobs, ...discovery.jobs].map(job => [job.id, job]));
+  return [...unique.values()].filter(job => !job.deadline || job.deadline >= Date.now())
+    .sort((first, second) => second.date - first.date);
 }
 
 function dashboard() {
@@ -190,7 +196,7 @@ function dashboard() {
   const active = data.applications.filter(item => ['applied', 'interview'].includes(item.stage));
   const fresh = jobs.filter(job => Date.now() - job.date < 86400000);
   const metrics = [
-    ['Novas oportunidades', fresh.length, 'Cadastradas nas últimas 24 h'],
+    ['Novas oportunidades', fresh.length, 'Publicadas ou cadastradas nas últimas 24 h'],
     ['Alta aderência', jobs.filter(job => scoreJob(job) >= 80).length, 'A partir de 80%'],
     ['Em andamento', active.length, 'Candidaturas ativas'],
     ['Entrevistas', active.filter(item => item.stage === 'interview').length, 'Agendadas ou em avaliação']
@@ -202,7 +208,7 @@ function dashboard() {
     <div class="panel monitor">
       <div class="monitor-main"><span class="dot${data.alerts.active ? '' : ' paused'}" aria-hidden="true"></span><div>
         <strong>${data.alerts.active ? 'Alertas ativos' : 'Alertas pausados'}</strong>
-        <p class="hint">Acompanhe as oportunidades cadastradas que combinam com sua busca.</p>
+        <p class="hint">${escape(discoveryStatus())}</p>
       </div></div>
       <a href="#alertas" class="link-button small">${alertMatches().length} alertas no Radar</a>
     </div>
@@ -222,7 +228,10 @@ function explore() {
     <section class="panel filters" aria-label="Filtros de vagas">
       <div class="filter-top">
         <input type="search" aria-label="Buscar por cargo, empresa ou palavra-chave" name="query" data-filter value="${escape(filters.query)}" placeholder="Buscar por cargo, empresa ou palavra-chave">
-        ${button('Importar vaga por link', 'import', 'secondary')}
+        <div class="action-row search-actions">
+          ${button('Adicionar por link', 'import', 'secondary')}
+          ${searchButton()}
+        </div>
       </div>
       <div class="filter-grid">${fields.map(([name, label, values]) => `<select name="${name}" aria-label="${label}" data-filter>${options(values, filters[name])}</select>`).join('')}</div>
     </section><div id="job-results">${results()}</div>`;
@@ -243,7 +252,7 @@ function results() {
   const totalPages = Math.max(1, Math.ceil(jobs.length / pageSize));
   searchPage = Math.min(searchPage, totalPages);
   const start = (searchPage - 1) * pageSize;
-  const sortLabel = { recent: 'Ordenado por cadastro', fit: 'Ordenado por aderência', title: 'Ordenado por cargo' };
+  const sortLabel = { recent: 'Ordenado por data', fit: 'Ordenado por aderência', title: 'Ordenado por cargo' };
   return `<div class="section-row results-head"><h2 aria-live="polite" tabindex="-1">${jobs.length} ${jobs.length === 1 ? 'oportunidade encontrada' : 'oportunidades encontradas'}</h2><p class="small muted">${sortLabel[filters.order]}</p></div>
     ${jobTable(jobs.slice(start, start + pageSize))}
     ${totalPages > 1 ? `<div class="pagination" aria-label="Paginação de oportunidades">
@@ -260,11 +269,12 @@ function detail(job) {
   const missing = (job.skills ?? []).filter(skill => !matchedSkills(job).includes(skill));
   const attention = score !== null && missing.length ? 'Sem evidências para ' + missing.join(', ') + '.' : '';
   const saved = data.applications.find(item => item.jobId === job.id);
-  const roleMeta = [job.company, job.model, job.contract, job.source, elapsed(job.date)].filter(Boolean).join('  ·  ');
+  const roleMeta = [job.company, job.location, job.model, job.contract, job.source, elapsed(job.date)].filter(Boolean).join('  ·  ');
 
   return page(job.title, roleMeta) + `<div class="two-col detail-grid">
     <article class="panel description">
       <h2>Sobre a oportunidade</h2>
+      ${job.automatic ? '<p class="small muted">Encontrada automaticamente na Gupy. Abra a publicação original para ler a descrição completa.</p>' : ''}
       <p>${escape(job.description || 'Descrição ainda não cadastrada.')}</p>
       ${job.duties?.length ? '<section><h3>Responsabilidades</h3>' + list(job.duties) + '</section>' : ''}
       ${(job.requirements ?? job.skills).length ? '<section><h3>Requisitos</h3>' + list(job.requirements ?? job.skills) + '</section>' : ''}
@@ -276,9 +286,9 @@ function detail(job) {
     <aside class="panel compatibility">
       <h2>Aderência ao seu perfil</h2>
       <strong class="score">${score === null ? '—' : score + '%'}</strong>
-      <p class="hint">${score === null ? 'Informe as competências do perfil e os requisitos da vaga para estimar a aderência.' : 'Compatibilidade estimada'}</p>
+      <p class="hint">${score === null ? 'Informe as competências do perfil e os requisitos da vaga para estimar a aderência.' : job.automatic ? 'Competências do seu perfil citadas na vaga' : 'Compatibilidade estimada'}</p>
       ${progress(score ?? 0, 'Compatibilidade estimada')}
-      <section><h3>Requisitos com evidências</h3>
+      <section><h3>${job.automatic ? 'Competências encontradas na descrição' : 'Requisitos com evidências'}</h3>
         ${evidence.length ? list(evidence, 'checklist') : '<p class="hint">Nenhuma evidência correspondente.</p>'}
         ${attention ? `<div class="attention-block"><h3>Pontos de atenção</h3><p class="hint warning">${escape(attention)}</p></div>` : ''}
         <p class="small muted fit-note">A pontuação é uma estimativa do Radar, não do ATS.</p>
@@ -419,11 +429,77 @@ function alertMatches() {
   const alerts = data.alerts;
   if (!alerts.active || !alerts.inApp) return [];
   return jobsByDate().filter(job =>
-    (!alerts.roles.length || alerts.roles.some(term => normalized(job.title).includes(normalized(term)))) &&
+    (job.automatic || !alerts.roles.length || alerts.roles.some(term => normalized(job.title).includes(normalized(term)))) &&
     (!alerts.models.length || alerts.models.includes(job.model)) &&
     (!alerts.levels.length || alerts.levels.includes(job.level)) &&
     (scoreJob(job) ?? 0) >= alerts.minimum
   );
+}
+
+function searchEnabled() {
+  return data.alerts.active && data.alerts.inApp && data.alerts.roles.length > 0;
+}
+
+function discoveryStatus() {
+  if (!data.alerts.active) return 'Ative a busca e escolha os cargos que deseja acompanhar.';
+  if (!data.alerts.inApp) return 'Ative as notificações dentro do Radar para acompanhar a busca.';
+  if (!discovery.checkedAt) return 'Aguardando a primeira busca na Gupy.';
+  const checked = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(discovery.checkedAt);
+  return 'Última busca na Gupy em ' + checked;
+}
+
+function searchButton(kind = 'primary') {
+  return `<button type="button" class="button ${kind}" data-action="search-jobs" ${searching ? 'disabled' : ''}>
+    ${searching ? 'Buscando…' : 'Buscar na Gupy agora'}
+  </button>`;
+}
+
+async function readDiscovery() {
+  try {
+    const response = await fetch('./api/discovery', { cache: 'no-store' });
+    if (response.ok) discovery = await response.json();
+  } catch {
+    // Workspace loading remains independent from the vacancy feed.
+  }
+}
+
+async function refreshJobs(announce = true) {
+  if (searching) return;
+  if (!searchEnabled()) {
+    if (announce) {
+      location.hash = '#alertas';
+      message('Ative a busca e salve os cargos de interesse em Meus alertas.');
+    }
+    return;
+  }
+  searching = true;
+  const initiatingRoute = route;
+  const initiatingButton = document.activeElement?.dataset?.action;
+  const updateButtons = () => {
+    for (const element of content.querySelectorAll('[data-action="search-jobs"]')) {
+      element.disabled = searching;
+      element.textContent = searching ? 'Buscando…' : 'Buscar na Gupy agora';
+    }
+  };
+  updateButtons();
+  try {
+    const response = await fetch('./api/discovery', { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    discovery = result;
+    if (route === initiatingRoute && ['visao-geral', 'vagas', 'alertas'].includes(route)) render();
+    if (route === initiatingRoute && initiatingButton === 'search-jobs') content.querySelector('[data-action="search-jobs"]')?.focus();
+    if (announce) {
+      if (result.status === 'busy') message('Já há uma busca em andamento. Confira o Radar em instantes.');
+      else if (result.newCount) message(result.newCount + (result.newCount === 1 ? ' nova oportunidade encontrada.' : ' novas oportunidades encontradas.'));
+      else message('Busca concluída. Confira as oportunidades em Meus alertas.');
+    }
+  } catch (error) {
+    if (announce) message(error.message || 'A Gupy está indisponível. Tente novamente em instantes.');
+  } finally {
+    searching = false;
+    updateButtons();
+  }
 }
 
 function alerts() {
@@ -439,24 +515,29 @@ function alerts() {
           <button class="tag add-tag" type="button" data-action="add-role">+ Cargo</button>
         </div></div>
         <div class="alert-group"><p class="hint">Modelo de trabalho</p><div class="tags">${modelTags(models, 'models')}</div></div>
-        <div class="alert-group"><p class="hint">Senioridade</p><div class="tags">${modelTags(levels, 'levels')}</div></div>
+        <div class="alert-group"><p class="hint">Senioridade</p><div class="tags">${modelTags(levels, 'levels')}</div>
+          <p class="small muted">O filtro usa a senioridade informada no título da vaga.</p></div>
+        <div class="alert-group"><label class="field">Cidade opcional
+          <input id="alert-city" maxlength="120" value="${escape(draft.city ?? '')}" placeholder="Todas as cidades">
+        </label></div>
         <div class="range-row"><label class="hint" for="alert-min">Aderência mínima para alertar</label>
           <input type="range" id="alert-min" min="0" max="100" value="${draft.minimum}" style="--range: ${draft.minimum}%"><output for="alert-min">${draft.minimum}%</output>
         </div>
-        <hr class="rule">${button('Salvar preferências', 'save-alerts')}
+        <hr class="rule"><div class="action-row">${button('Salvar preferências', 'save-alerts')}${searchButton('secondary')}</div>
       </section>
       <aside class="panel sources"><h2>Fontes de vagas</h2>
-        ${[['Gupy', 'Importação de vagas por link'], ['LinkedIn', 'Importação de alertas e links']].map(([source, caption]) => `<section class="source"><h3>${source}</h3>
-          <p class="small muted">${caption}</p><button class="tag attention" type="button" data-action="source" data-id="${source}">Configurar</button>
-        </section>`).join('')}
+        <section class="source"><h3>Gupy</h3>
+          <p class="small muted">Busca oficial de vagas públicas conforme suas preferências.</p>
+          <p class="small positive">${escape(discoveryStatus())}</p>
+        </section>
         <div class="channels"><h2>Notificações</h2>
           <label><input type="checkbox" id="alert-in-app" ${draft.inApp ? 'checked' : ''}>Dentro do Radar</label>
         </div>
-        <p class="small muted">Os alertas são atualizados quando você cadastra vagas ou edita suas preferências.</p>
+        <p class="small muted">As vagas encontradas aparecem aqui e em Explorar vagas.</p>
       </aside>
     </div>
     <section class="panel inbox"><h2>Alertas no Radar</h2>
-      ${matches.length ? `<ul>${matches.map(job => `<li><a href="${jobUrl(job.id)}">${escape(job.title)} · ${escape(job.company)} · ${scoreJob(job)}%</a></li>`).join('')}</ul>` : '<p class="hint">Nenhuma oportunidade corresponde às preferências salvas.</p>'}
+      ${matches.length ? `<ul>${matches.map(job => `<li><a href="${jobUrl(job.id)}">${escape(job.title)} · ${escape(job.company)}${scoreJob(job) === null ? '' : ' · ' + scoreJob(job) + '%'}</a></li>`).join('')}</ul>` : '<p class="hint">Nenhuma oportunidade corresponde às preferências salvas.</p>'}
     </section>`;
 }
 
@@ -465,7 +546,7 @@ function settings() {
     <section class="panel settings-panel">
       <h2>Dados da sua conta</h2><p class="hint">Suas vagas, candidaturas e perfil são salvos no Radar e ficam disponíveis quando você entra com a mesma conta.</p>
       <div class="action-row">${button('Baixar meus dados', 'export-data', 'secondary')}${button('Sincronizar agora', 'sync-data', 'secondary')}</div><hr class="rule">
-      <h2>Fontes e notificações</h2><p class="hint">Configure a importação e as preferências de busca em Meus alertas.</p>
+      <h2>Fontes e notificações</h2><p class="hint">Configure a busca automática da Gupy e suas preferências em Meus alertas.</p>
       <a href="#alertas" class="link-button">Abrir Meus alertas ›</a>
     </section>`;
 }
@@ -551,7 +632,7 @@ function importJob(source = '') {
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return 'Use um endereço HTTP ou HTTPS da vaga.';
     url.hash = '';
     const cleanUrl = url.href;
-    if (data.jobs.some(job => job.url === cleanUrl)) return 'Este link já foi importado.';
+    if (jobsByDate().some(job => job.url === cleanUrl)) return 'Este link já foi importado.';
     const host = url.hostname.toLowerCase();
     const matches = domain => host === domain || host.endsWith('.' + domain);
     const detected = matches('gupy.io') || matches('gupy.com.br') ? 'Gupy' : matches('linkedin.com') ? 'LinkedIn' : 'Outra';
@@ -568,6 +649,7 @@ function saveJob(id) {
   const job = findJob(id);
   if (!job || data.applications.some(item => item.jobId === id)) return;
   const score = scoreJob(job);
+  keepOpportunity(job);
   data.applications.push({ id: newId(), jobId: id, title: job.title, company: job.company, stage: 'saved',
     info: score === null ? job.source : job.source + ' · ' + score + '%', notes: '', updated: Date.now() });
   commit('Oportunidade adicionada às candidaturas salvas.');
@@ -634,8 +716,14 @@ function applicationEditor(id, stage = 'saved') {
   });
 }
 
+function keepOpportunity(job) {
+  if (!byId(data.jobs, job.id)) data.jobs.push(job);
+}
+
 function prepareResume(id) {
-  if (!findJob(id)) return;
+  const job = findJob(id);
+  if (!job) return;
+  keepOpportunity(job);
   data.resumeId = id;
   persist();
   location.hash = '#curriculos/' + encodeURIComponent(id);
@@ -701,6 +789,7 @@ function exportResume(id) {
 function setAlertRole() {
   openDialog('Adicionar cargo de interesse', '<div class="fields">' + input('Cargo', 'role', '', { required: true }) + '</div>', 'Adicionar cargo', fields => {
     if (alertDraft.roles.some(item => normalized(item) === normalized(fields.role))) return 'Esse cargo já está na busca.';
+    if (alertDraft.roles.length >= 6) return 'Você pode acompanhar até seis cargos de interesse.';
     alertDraft.roles.push(fields.role);
     render();
   });
@@ -727,7 +816,7 @@ function updateResults() {
 }
 
 const actions = {
-  import: () => importJob(), source: id => importJob(id), 'save-job': saveJob,
+  import: () => importJob(), 'save-job': saveJob, 'search-jobs': () => refreshJobs(),
   previous: () => pageBy(-1), next: () => pageBy(1),
   'profile-tab': id => {
     if (!saveProfile(false, false)) return;
@@ -742,11 +831,17 @@ const actions = {
   'alert-toggle': (_, target) => alterAlerts('alert-toggle', target),
   'remove-role': (_, target) => alterAlerts('remove-role', target),
   'add-role': setAlertRole,
-  'save-alerts': () => {
+  'save-alerts': async () => {
+    if (alertDraft.active && !alertDraft.roles.length) {
+      message('Adicione ao menos um cargo de interesse para ativar a busca.');
+      return;
+    }
     data.alerts = structuredClone(alertDraft);
-    commit('Preferências salvas.');
     render();
     content.querySelector('[data-action="save-alerts"]')?.focus();
+    if (!await persist()) return;
+    if (searchEnabled()) await refreshJobs();
+    else message('Preferências salvas.');
   },
   'sync-data': () => {
     if (writeConflict) {
@@ -785,6 +880,7 @@ content.addEventListener('input', event => {
     searchPage = 1;
     updateResults();
   }
+  if (target.id === 'alert-city') alertDraft.city = target.value;
   if (target.id === 'alert-min') {
     alertDraft.minimum = Number(target.value);
     target.style.setProperty('--range', target.value + '%');
@@ -867,8 +963,12 @@ async function initialize() {
     }
     ready = true;
     if (!data.profile.experiences.length) profileTab = 'personal';
+    await readDiscovery();
     if (syncStatus.textContent === 'Carregando…') syncStatus.textContent = 'Espaço pessoal';
     render();
+    if (searchEnabled() && (!discovery.checkedAt || Date.now() - discovery.checkedAt >= 2 * 60 * 60_000)) {
+      void refreshJobs(false);
+    }
   } catch {
     syncStatus.textContent = 'Conexão indisponível';
     content.innerHTML = page('Não foi possível carregar o Radar', 'Recarregue a página para tentar novamente.') +

@@ -6,9 +6,11 @@ Radar é um espaço pessoal para organizar uma busca de emprego. O projeto come�
 - Compare as competências do perfil com os requisitos informados para cada vaga.
 - Organize candidaturas em quatro etapas, com anotações e movimentação pelo quadro.
 - Revise o conteúdo do currículo e exporte um PDF com texto selecionável.
-- Configure alertas dentro do Radar com os filtros de cargo, modalidade, senioridade e aderência.
+- Ative a busca na Gupy com os filtros de cargo, cidade, modalidade, senioridade e aderência.
 
-Gupy, LinkedIn e outras fontes podem ser registradas por link. O cadastro usa as informações preenchidas no formulário. Os alertas são calculados sobre as vagas cadastradas.
+A busca automática consulta o [MCP oficial da Gupy para candidatos](https://candidatos.gupy.io/ia-para-pessoas-candidatas) e mostra o link da publicação original. Para começar, adicione cargos em Meus alertas, ative a busca e salve as preferências. Também é possível consultar na hora pelo botão **Buscar na Gupy agora**. O Radar envia os termos de cargo e os filtros de cidade e modalidade à fonte. A comparação com as competências acontece no servidor do Radar. Vagas de outras fontes podem ser adicionadas pelo link.
+
+No ambiente hospedado, a tarefa vinculada ao Site pode acionar `POST /api/discovery/scheduled` usando a conexão privada do Sites. A busca guarda os resultados por conta, evita alertas repetidos e preserva a última consulta concluída se a Gupy estiver indisponível.
 
 ## Executar localmente
 

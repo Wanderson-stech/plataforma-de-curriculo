@@ -11,12 +11,15 @@ const { default: worker } = await import('../dist/server/index.js');
 const directory = new URL('.radar-local/', project);
 await mkdir(directory, { recursive: true });
 const database = new DatabaseSync(fileURLToPath(new URL('workspace.sqlite', directory)));
-database.exec(await readFile(new URL('drizzle/0000_workspace.sql', project), 'utf8'));
+for (const migration of ['0000_workspace.sql', '0001_job_discovery.sql']) {
+  database.exec(await readFile(new URL('drizzle/' + migration, project), 'utf8'));
+}
 
 const DB = {
   prepare(sql) {
     const statement = database.prepare(sql);
     return {
+      all: () => ({ results: statement.all() }),
       bind(...parameters) {
         return {
           first: () => statement.get(...parameters),
@@ -32,6 +35,7 @@ const origin = 'http://127.0.0.1:' + port;
 createServer(async (input, output) => {
   try {
     const headers = new Headers(input.headers);
+    // The unattended endpoint is for the production owner's private Site.
     headers.set('oai-authenticated-user-id', 'radar-local');
     const method = input.method;
     const body = ['GET', 'HEAD'].includes(method) ? undefined : input;

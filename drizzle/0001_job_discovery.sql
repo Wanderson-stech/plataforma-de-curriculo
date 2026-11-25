@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS job_discovery (
+  user_id TEXT PRIMARY KEY,
+  criteria TEXT NOT NULL DEFAULT '',
+  checked_at INTEGER NOT NULL DEFAULT 0,
+  lock_until INTEGER NOT NULL DEFAULT 0,
+  jobs TEXT NOT NULL DEFAULT '[]',
+  seen TEXT NOT NULL DEFAULT '[]'
+);

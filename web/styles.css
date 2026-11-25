@@ -123,7 +123,9 @@ td:last-child { white-space: nowrap; }
 .fit { color: var(--brand); font-size: 15px; font-weight: 650; }
 .filters { padding: 16px 44px 14px 16px; }
 .filter-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.filter-top input { width: 65%; min-height: 42px; }
+.filter-top input { flex: 1 1 250px; min-height: 42px; }
+.search-actions { gap: 8px; justify-content: flex-end; }
+.alert-group .tags + .small { margin-top: 8px; }
 .filter-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { display: block; min-width: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 13px; line-height: 1.35; }
 input::placeholder, textarea::placeholder { color: var(--muted); }
